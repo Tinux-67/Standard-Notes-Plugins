@@ -1,73 +1,124 @@
-# Standard Notes Editor Plugin Template
+# Standard Notes Tag Relationship Visualizer Plugin
 
-This is a template repo for building a Standard Notes Editor Plugin. Note that Plugins were called Extensions in the past, hence the name of this repo.
+A Standard Notes plugin that visualizes the relationship between notes based on their tags. This plugin provides both a graph view and a list view, with powerful filter and search functionality to help you understand how your notes are connected.
 
-For a companion guide, see the [Guide to creating Standard Notes Plugins](https://randombits.dev/standard-notes/creating-extensions)
+## Features
 
-## Getting Started
+- **Graph Visualization**: Interactive force-directed graph showing notes as nodes and tag relationships as links
+- **List View**: Traditional list view with note cards showing tags and connection counts
+- **Search Functionality**: Search notes by title or tags
+- **Tag Filtering**: Filter notes by selecting one or more tags
+- **Dark Theme Support**: Automatically adapts to Standard Notes dark theme
+- **Responsive Design**: Works well on different screen sizes
+- **Interactive Tooltips**: Hover over nodes to see note details
+- **Drag and Drop**: Drag nodes to rearrange the graph
 
-Click on the `Use this template` button to create a new repo based on this template.
+## Installation
 
-Then clone your new repo, install dependencies, and start the dev server:
+### From Standard Notes
 
-```
+1. Open Standard Notes
+2. Go to **Extensions** > **Install Extension**
+3. Enter the plugin URL: `https://tinux-67.github.io/Standard-Notes-Plugins/ext.json`
+4. Click **Install**
+
+### Manual Installation
+
+1. Download the latest `latest.zip` from [GitHub Pages](https://tinux-67.github.io/Standard-Notes-Plugins/latest.zip)
+2. In Standard Notes, go to **Extensions** > **Install Extension** > **From File**
+3. Select the downloaded ZIP file
+
+## Development
+
+### Getting Started
+
+```bash
 # Install dependencies
 pnpm install
 
-# Start Dev Server
+# Start development server
 pnpm run start
 ```
 
-The demo page should be launched automatically.
+The demo page will be launched automatically at `http://localhost:8080/demo.html`
 
-## Demo Page
+### Building
 
-The template includes a separate demo page that allows you to develop and test your plugin without it running inside standard notes. It works by wrapping your editor with a **mock standard notes**, which sends and receives the same events that the real application would.
+```bash
+# Build for production
+pnpm run build
 
-The demo page and related scripts is built as a separate entry, and therefore is not included in your actual editor build. It is only included in the demo.html page.
-
-The demo page can also be used to demonstrate your plugin on your personal website or blog.
-
-Demo Example: https://nienow.github.io/sn-extension-template/demo.html
-
-## Plugin JSON
-
-When users install your plugin, they will be using the ext.json file, which contains information about your plugin. You will want to edit this file at public/ext.json, changing the urls, identifier, name, and description:
-
-```json
-{
-  "identifier": "dev.randombits.template",
-  "name": "Plugin Template",
-  "content_type": "SN|Component",
-  "area": "editor-editor",
-  "version": "$VERSION$",
-  "description": "A custom editor",
-  "url": "https://nienow.github.io/sn-extension-template/",
-  "download_url": "https://nienow.github.io/sn-extension-template/latest.zip",
-  "latest_url": "https://nienow.github.io/sn-extension-template/ext.json"
-}
+# Preview the build
+pnpm run preview
 ```
 
-The version variable (`$VERSION$`) is written during build, and is copied from the version in your `package.json` file.
+### Project Structure
 
-The build automatically creates a `latest.zip` distribution that is used by the desktop application.
+- `src/components/TagVisualizer.tsx` - Main plugin component
+- `src/index.tsx` - Entry point for the plugin
+- `src/index.scss` - Styles for the plugin
+- `src/demo/` - Demo page and mock data
+- `public/ext.json` - Plugin metadata
+- `public/local.json` - Local development plugin metadata
 
-The `public/local.json` file can be used if you want to install your editor into standard notes while it is running on localhost. Sometimes it is necessary to do this to debug issues. It has a separate name and identifier so that you can install both the production version and dev version in standard notes at the same time.
+## How It Works
 
-## Preact Framework
+The plugin:
 
-This template uses **Preact** instead of **React**. But because we are also pulling in the `@preact/compat` package, it is compatible with the React API and can take advantage of the full react ecosystem.
+1. Fetches all notes from Standard Notes using the extension API
+2. Extracts tags from each note
+3. Creates connections between notes that share tags
+4. Renders an interactive graph using D3.js
+5. Allows filtering by search query and selected tags
 
-If you don’t know about Preact, it is smaller and faster than React, and contains basically all the React functionality, so there is no reason not to use it.
+### Graph Visualization
 
-## Github Workflow
+- **Nodes**: Represent notes, colored based on the number of tags
+- **Links**: Represent shared tags between notes, with thickness indicating the number of shared tags
+- **Interactions**: Drag nodes, hover for details, click tags to filter
 
-There is a github workflow setup in `.github/workflows/node.js.yml`, which will automatically build and deploy your plugin to github pages.
+### List View
 
-You will just need to create a `gh-pages` branch. You may also need to manually enable Github Pages settings on your repository (see [here](https://github.com/peaceiris/actions-gh-pages?tab=readme-ov-file#%EF%B8%8F-first-deployment-with-github_token)).
+- Shows notes as cards with their tags
+- Displays connection count for each note
+- Click on tags to filter
 
-## Resources
+## Customization
 
-[Guide to creating Standard Notes Plugins](https://randombits.dev/standard-notes/creating-extensions)
+You can customize the plugin by modifying the following files:
 
-[Guide to installing Standard Notes Plugins](https://randombits.dev/standard-notes/installing-extensions)
+- `public/ext.json` - Update plugin name, description, and URLs
+- `src/components/TagVisualizer.tsx` - Modify the visualization logic
+- `src/index.scss` - Change the styling
+
+## Deployment
+
+This plugin is automatically deployed to GitHub Pages using GitHub Actions. The workflow:
+
+1. Push changes to the `main` branch
+2. GitHub Actions builds the plugin
+3. Built files are deployed to the `gh-pages` branch
+4. GitHub Pages serves the plugin from `https://tinux-67.github.io/Standard-Notes-Plugins/`
+
+### Setting Up GitHub Pages
+
+1. Create a `gh-pages` branch in your repository
+2. Enable GitHub Pages in repository settings:
+   - Go to **Settings** > **Pages**
+   - Select **Deploy from a branch**
+   - Choose **gh-pages** branch and **/ (root)** folder
+3. The workflow will automatically deploy on each push to `main`
+
+## License
+
+MIT License - see [LICENSE](LICENSE) file for details.
+
+## Credits
+
+- Built with [Standard Notes Extension API](https://github.com/standardnotes/sn-extension-api)
+- Uses [D3.js](https://d3js.org/) for graph visualization
+- Uses [Preact](https://preactjs.com/) for React compatibility
+
+## Support
+
+For issues or feature requests, please open an issue on the [GitHub repository](https://github.com/Tinux-67/Standard-Notes-Plugins).

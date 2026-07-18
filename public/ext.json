@@ -1,11 +1,11 @@
 {
-  "identifier": "dev.randombits.template",
-  "name": "Extension Template",
+  "identifier": "dev.tinux67.tag-visualizer",
+  "name": "Tag Relationship Visualizer",
   "content_type": "SN|Component",
   "area": "editor-editor",
   "version": "$VERSION$",
-  "description": "A custom editor",
-  "url": "https://nienow.github.io/sn-extension-template/",
-  "download_url": "https://nienow.github.io/sn-extension-template/latest.zip",
-  "latest_url": "https://nienow.github.io/sn-extension-template/ext.json"
+  "description": "Visualize the relationship between notes based on their tags with filter and search functionality",
+  "url": "https://tinux-67.github.io/Standard-Notes-Plugins/",
+  "download_url": "https://tinux-67.github.io/Standard-Notes-Plugins/latest.zip",
+  "latest_url": "https://tinux-67.github.io/Standard-Notes-Plugins/ext.json"
 }
