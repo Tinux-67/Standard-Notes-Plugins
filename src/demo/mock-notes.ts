@@ -73,6 +73,19 @@ export class MockStandardNotes {
   private updateStream(data: TestData) {
     this.streamData = JSON.parse(JSON.stringify(STREAM_EVENT_DATA));
     this.streamData.item.content.text = data.text;
+    this.streamData.item.content.title = data.content?.title || '';
+    this.streamData.item.content.tags = data.content?.tags || [];
     this.streamData.item.content.appData[this.streamData.item.content.editorIdentifier] = data.meta;
   }
+}
+
+export interface TestData {
+  title: string;
+  text: string;
+  meta: any;
+  content?: {
+    title?: string;
+    text?: string;
+    tags?: string[];
+  };
 }

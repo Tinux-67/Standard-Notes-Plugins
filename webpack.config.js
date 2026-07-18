@@ -6,7 +6,7 @@ const PACKAGE = require('./package.json');
 const version = PACKAGE.version;
 
 module.exports = (env, argv) => ({
-  mode: 'production',
+  mode: argv.mode === 'development' ? 'development' : 'production',
   entry: {
     main: 'index.tsx',
     demo: 'demo/demo.tsx'

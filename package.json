@@ -1,6 +1,7 @@
 {
-  "name": "sn-extension-template",
+  "name": "sn-tag-visualizer",
   "version": "1.0.0",
+  "description": "A Standard Notes plugin that visualizes note relationships based on tags",
   "scripts": {
     "start": "webpack serve --mode development",
     "build": "webpack",
@@ -8,6 +9,7 @@
   },
   "dependencies": {
     "@preact/compat": "^18.3.2",
+    "d3": "^7.9.0",
     "preact": "^10.29.2",
     "sn-extension-api": "^0.4.0"
   },
@@ -16,6 +18,7 @@
     "@babel/plugin-transform-react-jsx": "^7.29.7",
     "@babel/preset-env": "^7.29.7",
     "@babel/preset-typescript": "^7.29.7",
+    "@types/d3": "^7.4.3",
     "@types/react": "^19.2.15",
     "@types/react-dom": "^19.2.3",
     "babel-loader": "^10.1.1",

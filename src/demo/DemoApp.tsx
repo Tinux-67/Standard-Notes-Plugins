@@ -1,4 +1,4 @@
-import {useRef, useState} from 'react';
+import {useRef, useState, useEffect} from 'react';
 import {TEST_DATA} from "./test-data";
 import {MockStandardNotes} from "./mock-notes";
 
@@ -31,13 +31,29 @@ const DemoApp = () => {
   };
 
   const onChangeTheme = (e) => {
-    setTheme(e.target.checked ? 'dark' : 'light');
+    const newTheme = e.target.checked ? 'dark' : 'light';
+    setTheme(newTheme);
     mock.toggleTheme(e.target.checked);
+    
+    // Update document theme attribute
+    if (newTheme === 'dark') {
+      document.documentElement.setAttribute('data-theme', 'dark');
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+    }
   };
 
   const onFrameLoad = () => {
     mock.onReady(iframeRef.current.contentWindow);
   };
+  
+  // Set initial theme
+  useEffect(() => {
+    if (theme === 'dark') {
+      document.documentElement.setAttribute('data-theme', 'dark');
+    }
+  }, []);
+
   return (
     <div className="demo">
       <div className="menu">
