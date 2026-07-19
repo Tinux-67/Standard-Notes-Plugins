@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo, memo } from "react";
 import {
   select,
   forceSimulation,
@@ -12,6 +12,10 @@ import {
   Simulation,
 } from "d3";
 import snApi from "sn-extension-api";
+
+// ============================================================================
+// INTERFACES & TYPES
+// ============================================================================
 
 interface NoteNode {
   id: string;
@@ -32,25 +36,103 @@ interface GraphData {
   links: TagLink[];
 }
 
-// Constants voor D3.js configuratie
+type D3Node = SimulationNodeDatum & NoteNode;
+type D3Link = SimulationLinkDatum<D3Node> & TagLink;
+
+// ============================================================================
+// CONSTANTS
+// ============================================================================
+
 const D3_CONFIG = {
   NODE_RADIUS: 20,
   LINK_DISTANCE: 100,
   CHARGE_STRENGTH: -200,
   COLLISION_RADIUS: 30,
   COLORS: ["#6366f1", "#8b5cf6", "#ec4899", "#f59e0b", "#10b981", "#3b82f6"],
-  // Performance: Beperk het aantal tags dat getoond wordt in tooltips
   MAX_TAGS_IN_TOOLTIP: 10,
-  // Performance: Beperk het aantal tags dat getoond wordt als badge
   MAX_TAG_BADGES: 2,
-  // Performance: Debounce tijd voor resize
   RESIZE_DEBOUNCE_MS: 200,
-  // Performance: Maximaal aantal nodes voor full graph rendering
   MAX_NODES_FOR_FULL_RENDER: 100,
-};
+} as const;
 
-// Helper functie om graph data te genereren met O(n²) complexiteit
-// Geoptimaliseerd met Maps voor snellere lookups
+// ============================================================================
+// MEMOIZED COMPONENTS
+// ============================================================================
+
+// Memoized TagChip component - voorkomt onnodige re-renders
+interface TagChipProps {
+  tag: string;
+  isSelected: boolean;
+  onClick: (tag: string) => void;
+}
+
+const TagChip = memo(({ tag, isSelected, onClick }: TagChipProps) => {
+  return (
+    <span
+      className={`tag-chip ${isSelected ? "selected" : ""}`}
+      onClick={() => onClick(tag)}
+    >
+      {tag}
+    </span>
+  );
+});
+
+TagChip.displayName = 'TagChip';
+
+// Memoized NoteTag component - voorkomt onnodige re-renders
+interface NoteTagProps {
+  tag: string;
+  onClick: (tag: string) => void;
+}
+
+const NoteTag = memo(({ tag, onClick }: NoteTagProps) => {
+  return (
+    <span
+      className="note-tag"
+      onClick={() => onClick(tag)}
+    >
+      {tag}
+    </span>
+  );
+});
+
+NoteTag.displayName = 'NoteTag';
+
+// Memoized NoteCard component - voorkomt onnodige re-renders
+interface NoteCardProps {
+  note: NoteNode;
+  graphData: GraphData;
+  onTagClick: (tag: string) => void;
+}
+
+const NoteCard = memo(({ note, graphData, onTagClick }: NoteCardProps) => {
+  // Memoize connection count calculation
+  const connectionCount = useMemo(() => {
+    return graphData.links.filter((l) => l.source === note.id || l.target === note.id).length;
+  }, [note.id, graphData.links]);
+
+  return (
+    <div key={note.id} className="note-card">
+      <div className="note-title">{note.title}</div>
+      <div className="note-tags">
+        {note.tags.map((tag) => (
+          <NoteTag key={tag} tag={tag} onClick={onTagClick} />
+        ))}
+      </div>
+      <div className="note-connections">
+        Connected to {connectionCount} notes
+      </div>
+    </div>
+  );
+});
+
+NoteCard.displayName = 'NoteCard';
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+// Pure function - geen side effects, altijd zelfde output voor zelfde input
 const createGraphData = (noteNodes: NoteNode[]): GraphData => {
   const tagToNotes = new Map<string, Set<string>>();
   const noteMap = new Map<string, NoteNode>();
@@ -93,13 +175,72 @@ const createGraphData = (noteNodes: NoteNode[]): GraphData => {
   };
 };
 
-type D3Node = SimulationNodeDatum & NoteNode;
-type D3Link = SimulationLinkDatum<D3Node> & TagLink;
+// Memoized filter function voor notes
+const filterNotes = (
+  notes: NoteNode[],
+  searchQuery: string,
+  selectedTags: string[]
+): NoteNode[] => {
+  return notes.filter((node) => {
+    const matchesSearch =
+      searchQuery.trim() === "" ||
+      node.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      node.tags.some((tag) => tag.toLowerCase().includes(searchQuery.toLowerCase()));
+    
+    const matchesTags =
+      selectedTags.length === 0 || selectedTags.some((tag) => node.tags.includes(tag));
+    
+    return matchesSearch && matchesTags;
+  });
+};
+
+// Memoized filter function voor graph data
+const filterGraphData = (
+  graphData: GraphData,
+  searchQuery: string,
+  selectedTags: string[]
+): GraphData => {
+  let filteredNodes = [...graphData.nodes];
+  let filteredLinks = [...graphData.links];
+
+  // Apply search filter
+  if (searchQuery.trim()) {
+    const query = searchQuery.toLowerCase();
+    filteredNodes = filteredNodes.filter(
+      (node) =>
+        node.title.toLowerCase().includes(query) ||
+        node.tags.some((tag) => tag.toLowerCase().includes(query))
+    );
+  }
+
+  // Apply tag filter
+  if (selectedTags.length > 0) {
+    const selectedTagsSet = new Set(selectedTags);
+    filteredNodes = filteredNodes.filter((node) =>
+      node.tags.some((tag) => selectedTagsSet.has(tag))
+    );
+  }
+
+  // Filter links to only include those between filtered nodes
+  const filteredNodeIds = new Set(filteredNodes.map((n) => n.id));
+  filteredLinks = filteredLinks.filter((link) => {
+    return filteredNodeIds.has(link.source) && filteredNodeIds.has(link.target);
+  });
+
+  return { nodes: filteredNodes, links: filteredLinks };
+};
+
+// ============================================================================
+// MAIN COMPONENT
+// ============================================================================
 
 const TagVisualizer: React.FC = () => {
+  // Refs
   const svgRef = useRef<SVGSVGElement>(null);
   const simulationRef = useRef<Simulation<D3Node, D3Link> | null>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
+
+  // State
   const [notes, setNotes] = useState<NoteNode[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -113,7 +254,11 @@ const TagVisualizer: React.FC = () => {
     renderTime: 0,
   });
 
-  // Fetch all notes from Standard Notes
+  // ==========================================================================
+  // DATA FETCHING
+  // ==========================================================================
+
+  // Memoized fetch function
   const fetchNotes = useCallback(async () => {
     const startTime = performance.now();
     try {
@@ -176,42 +321,31 @@ const TagVisualizer: React.FC = () => {
     fetchNotes();
   }, [fetchNotes]);
 
+  // ==========================================================================
+  // MEMOIZED DERIVED DATA
+  // ==========================================================================
+
   // Memoized graph data - alleen herberekenen als notes veranderen
   const fullGraphData = useMemo(() => graphData, [graphData]);
 
-  // Filter nodes and links based on search and selected tags (memoized)
+  // Memoized filtered graph data
   const filteredGraphData = useMemo(() => {
-    let filteredNodes = [...fullGraphData.nodes];
-    let filteredLinks = [...fullGraphData.links];
-
-    // Apply search filter
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase();
-      filteredNodes = filteredNodes.filter(
-        (node) =>
-          node.title.toLowerCase().includes(query) ||
-          node.tags.some((tag) => tag.toLowerCase().includes(query))
-      );
-    }
-
-    // Apply tag filter
-    if (selectedTags.length > 0) {
-      const selectedTagsSet = new Set(selectedTags);
-      filteredNodes = filteredNodes.filter((node) =>
-        node.tags.some((tag) => selectedTagsSet.has(tag))
-      );
-    }
-
-    // Filter links to only include those between filtered nodes
-    const filteredNodeIds = new Set(filteredNodes.map((n) => n.id));
-    filteredLinks = filteredLinks.filter((link) => {
-      return filteredNodeIds.has(link.source) && filteredNodeIds.has(link.target);
-    });
-
-    return { nodes: filteredNodes, links: filteredLinks };
+    return filterGraphData(fullGraphData, searchQuery, selectedTags);
   }, [fullGraphData, searchQuery, selectedTags]);
 
-  // D3.js rendering met useRef voor simulation hergebruik
+  // Memoized filtered notes voor list view
+  const filteredNotes = useMemo(() => {
+    return filterNotes(notes, searchQuery, selectedTags);
+  }, [notes, searchQuery, selectedTags]);
+
+  // Memoized allTags voor snellere rendering
+  const allTagsMemoized = useMemo(() => allTags, [allTags]);
+
+  // ==========================================================================
+  // D3.JS RENDERING
+  // ==========================================================================
+
+  // Render graph function - memoized met useCallback
   const renderGraph = useCallback((
     nodes: D3Node[],
     links: D3Link[],
@@ -415,6 +549,10 @@ const TagVisualizer: React.FC = () => {
     };
   }, [filteredGraphData, renderGraph]);
 
+  // ==========================================================================
+  // EVENT HANDLERS (allemaal memoized met useCallback)
+  // ==========================================================================
+
   // Handle window resize met debounce
   useEffect(() => {
     let resizeTimeout: number | null = null;
@@ -441,6 +579,7 @@ const TagVisualizer: React.FC = () => {
     };
   }, []);
 
+  // Memoized tag selection handler
   const toggleTagSelection = useCallback((tag: string) => {
     setSelectedTags((prev) => {
       if (prev.includes(tag)) {
@@ -450,38 +589,36 @@ const TagVisualizer: React.FC = () => {
     });
   }, []);
 
+  // Memoized clear filters handler
   const clearFilters = useCallback(() => {
     setSearchQuery("");
     setSelectedTags([]);
   }, []);
 
-  const filteredNotes = useMemo(() => {
-    return notes.filter((node) => {
-      const matchesSearch =
-        searchQuery.trim() === "" ||
-        node.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        node.tags.some((tag) => tag.toLowerCase().includes(searchQuery.toLowerCase()));
-      const matchesTags =
-        selectedTags.length === 0 || selectedTags.some((tag) => node.tags.includes(tag));
-      return matchesSearch && matchesTags;
-    });
-  }, [notes, searchQuery, selectedTags]);
+  // Memoized view mode toggle handlers
+  const setGraphView = useCallback(() => setViewMode("graph"), []);
+  const setListView = useCallback(() => setViewMode("list"), []);
+
+  // ==========================================================================
+  // RENDER
+  // ==========================================================================
 
   return (
     <div className="tag-visualizer">
+      {/* Header */}
       <div className="tag-visualizer-header">
         <h2>Tag Relationship Visualizer</h2>
         <div className="tag-visualizer-controls">
           <div className="view-mode-toggle">
             <button
               className={viewMode === "graph" ? "active" : ""}
-              onClick={() => setViewMode("graph")}
+              onClick={setGraphView}
             >
               Graph View
             </button>
             <button
               className={viewMode === "list" ? "active" : ""}
-              onClick={() => setViewMode("list")}
+              onClick={setListView}
             >
               List View
             </button>
@@ -489,6 +626,7 @@ const TagVisualizer: React.FC = () => {
         </div>
       </div>
 
+      {/* Filters */}
       <div className="tag-visualizer-filters">
         <div className="search-filter">
           <input
@@ -509,19 +647,19 @@ const TagVisualizer: React.FC = () => {
             )}
           </div>
           <div className="tag-chips">
-            {allTags.map((tag) => (
-              <span
+            {allTagsMemoized.map((tag) => (
+              <TagChip
                 key={tag}
-                className={`tag-chip ${selectedTags.includes(tag) ? "selected" : ""}`}
-                onClick={() => toggleTagSelection(tag)}
-              >
-                {tag}
-              </span>
+                tag={tag}
+                isSelected={selectedTags.includes(tag)}
+                onClick={toggleTagSelection}
+              />
             ))}
           </div>
         </div>
       </div>
 
+      {/* Content */}
       {isLoading ? (
         <div className="loading">Loading notes...</div>
       ) : error ? (
@@ -539,28 +677,12 @@ const TagVisualizer: React.FC = () => {
             <div className="list-container">
               <div className="notes-list">
                 {filteredNotes.map((note) => (
-                  <div key={note.id} className="note-card">
-                    <div className="note-title">{note.title}</div>
-                    <div className="note-tags">
-                      {note.tags.map((tag) => (
-                        <span
-                          key={tag}
-                          className="note-tag"
-                          onClick={() => toggleTagSelection(tag)}
-                        >
-                          {tag}
-                        </span>
-                      ))}
-                    </div>
-                    <div className="note-connections">
-                      Connected to
-                      {
-                        graphData.links.filter((l) => l.source === note.id || l.target === note.id)
-                          .length
-                      }{" "}
-                      notes
-                    </div>
-                  </div>
+                  <NoteCard
+                    key={note.id}
+                    note={note}
+                    graphData={graphData}
+                    onTagClick={toggleTagSelection}
+                  />
                 ))}
                 {filteredNotes.length === 0 && (
                   <div className="no-results">No notes match your filters</div>
@@ -571,6 +693,7 @@ const TagVisualizer: React.FC = () => {
         </div>
       )}
 
+      {/* Footer */}
       <div className="tag-visualizer-footer">
         <div className="stats">
           <span>Total Notes: {notes.length}</span>
