@@ -3,6 +3,11 @@ node_modules/
 
 # Build output
 dist/
+build/
+
+# Bundle analysis
+bundle-stats.json
+stats/
 
 # IDE
 .idea/
