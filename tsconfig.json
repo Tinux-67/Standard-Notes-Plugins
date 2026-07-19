@@ -3,7 +3,7 @@
     "incremental": true,
     "outDir": "build/lib",
     "target": "esnext",
-    "module": "esnext",
+    "module": "Node16",
     "lib": [
       "DOM",
       "ESNext"
@@ -19,14 +19,16 @@
     "noFallthroughCasesInSwitch": true,
     "allowJs": false,
     "jsx": "preserve",
-    "moduleResolution": "node",
-    "baseUrl": "src",
+    "moduleResolution": "node16",
     "forceConsistentCasingInFileNames": true,
     "esModuleInterop": true,
-    "suppressImplicitAnyIndexErrors": true,
     "strictNullChecks": false,
     "allowSyntheticDefaultImports": true,
-    "experimentalDecorators": true
+    "experimentalDecorators": true,
+    "skipLibCheck": true,
+    "paths": {
+      "*": ["./src/*"]
+    }
   },
   "include": [
     "src/**/*"

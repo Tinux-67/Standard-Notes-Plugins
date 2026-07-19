@@ -1,11 +1,16 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import * as d3 from 'd3';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import {
+  select,
+  forceSimulation,
+  forceLink,
+  forceManyBody,
+  forceCenter,
+  forceCollide,
+  drag,
+  SimulationNodeDatum,
+  SimulationLinkDatum,
+} from "d3";
 import snApi from "sn-extension-api";
-
-interface NoteTag {
-  title: string;
-  notes: string[];
-}
 
 interface NoteNode {
   id: string;
@@ -26,78 +31,121 @@ interface GraphData {
   links: TagLink[];
 }
 
+// Constants voor D3.js configuratie
+const D3_CONFIG = {
+  NODE_RADIUS: 20,
+  LINK_DISTANCE: 100,
+  CHARGE_STRENGTH: -200,
+  COLLISION_RADIUS: 30,
+  COLORS: ["#6366f1", "#8b5cf6", "#ec4899", "#f59e0b", "#10b981", "#3b82f6"],
+};
+
+// Helper functie om graph data te genereren met O(n) complexiteit
+const createGraphData = (noteNodes: NoteNode[]): GraphData => {
+  const tagToNotes = new Map<string, Set<string>>();
+
+  // Bouw een map van tag naar set van note IDs (O(n))
+  noteNodes.forEach((node) => {
+    node.tags.forEach((tag) => {
+      if (!tagToNotes.has(tag)) {
+        tagToNotes.set(tag, new Set());
+      }
+      tagToNotes.get(tag)!.add(node.id);
+    });
+  });
+
+  // Genereer links tussen notes die tags delen (O(n))
+  const links: TagLink[] = [];
+  const linkMap = new Map<string, TagLink>(); // Om duplicate links te voorkomen
+
+  tagToNotes.forEach((noteIds) => {
+    const ids = Array.from(noteIds);
+    for (let i = 0; i < ids.length; i++) {
+      for (let j = i + 1; j < ids.length; j++) {
+        const source = ids[i];
+        const target = ids[j];
+        const linkKey = `${source}<->${target}`;
+
+        if (!linkMap.has(linkKey)) {
+          // Tel het aantal gedeelde tags
+          const sourceNode = noteNodes.find((n) => n.id === source);
+          const targetNode = noteNodes.find((n) => n.id === target);
+          const sharedTags = sourceNode?.tags.filter((tag) => targetNode?.tags.includes(tag)) || [];
+
+          links.push({
+            source,
+            target,
+            value: sharedTags.length,
+          });
+          linkMap.set(linkKey, links[links.length - 1]);
+        } else {
+          // Verhoog de value als de link al bestaat
+          const existingLink = linkMap.get(linkKey)!;
+          existingLink.value += 1;
+        }
+      }
+    }
+  });
+
+  return { nodes: noteNodes, links };
+};
+
+type D3Node = SimulationNodeDatum & NoteNode;
+type D3Link = SimulationLinkDatum<D3Node> & TagLink;
+
 const TagVisualizer: React.FC = () => {
   const svgRef = useRef<SVGSVGElement>(null);
   const [notes, setNotes] = useState<NoteNode[]>([]);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState("");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [allTags, setAllTags] = useState<string[]>([]);
   const [graphData, setGraphData] = useState<GraphData>({ nodes: [], links: [] });
   const [isLoading, setIsLoading] = useState(true);
-  const [viewMode, setViewMode] = useState<'graph' | 'list'>('graph');
+  const [error, setError] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<"graph" | "list">("graph");
 
   // Fetch all notes from Standard Notes
   const fetchNotes = useCallback(async () => {
     try {
       setIsLoading(true);
-      const items = await snApi.getItems();
-      
+      setError(null);
+      const items = await (snApi as any).getItems();
+
+      if (!items) {
+        throw new Error("No items returned from Standard Notes");
+      }
+
       const noteNodes: NoteNode[] = [];
       const tagSet = new Set<string>();
-      const tagToNotes: Record<string, string[]> = {};
 
-      items.forEach(item => {
-        if (item.content_type === 'Note') {
-          const title = item.content?.title || 'Untitled';
+      items.forEach((item: any) => {
+        if (item.content_type === "Note") {
+          const title = item.content?.title || "Untitled";
           const tags = item.content?.tags || [];
-          
+
           noteNodes.push({
             id: item.uuid,
             title,
-            tags
+            tags,
           });
-          
-          tags.forEach(tag => {
+
+          tags.forEach((tag: string) => {
             tagSet.add(tag);
-            if (!tagToNotes[tag]) {
-              tagToNotes[tag] = [];
-            }
-            tagToNotes[tag].push(item.uuid);
           });
         }
       });
 
       setNotes(noteNodes);
       setAllTags(Array.from(tagSet).sort());
-      
-      // Create graph data
-      const links: TagLink[] = [];
-      const tagArray = Array.from(tagSet);
-      
-      // Create links between notes that share tags
-      for (let i = 0; i < noteNodes.length; i++) {
-        for (let j = i + 1; j < noteNodes.length; j++) {
-          const sharedTags = noteNodes[i].tags.filter(tag => 
-            noteNodes[j].tags.includes(tag)
-          );
-          if (sharedTags.length > 0) {
-            links.push({
-              source: noteNodes[i].id,
-              target: noteNodes[j].id,
-              value: sharedTags.length
-            });
-          }
-        }
-      }
 
-      setGraphData({
-        nodes: noteNodes,
-        links
-      });
-      
+      // Create graph data met geoptimaliseerde functie
+      const newGraphData = createGraphData(noteNodes);
+      setGraphData(newGraphData);
+
       setIsLoading(false);
-    } catch (error) {
-      console.error('Error fetching notes:', error);
+    } catch (err) {
+      console.error("Error fetching notes:", err);
+      setError(err instanceof Error ? err.message : "Unknown error");
       setIsLoading(false);
     }
   }, []);
@@ -106,32 +154,32 @@ const TagVisualizer: React.FC = () => {
     fetchNotes();
   }, [fetchNotes]);
 
-  // Filter nodes and links based on search and selected tags
-  const filteredGraphData = useCallback(() => {
+  // Filter nodes and links based on search and selected tags (memoized)
+  const filteredGraphData = useMemo(() => {
     let filteredNodes = [...graphData.nodes];
     let filteredLinks = [...graphData.links];
 
     // Apply search filter
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
-      filteredNodes = filteredNodes.filter(node => 
-        node.title.toLowerCase().includes(query) ||
-        node.tags.some(tag => tag.toLowerCase().includes(query))
+      filteredNodes = filteredNodes.filter(
+        (node) =>
+          node.title.toLowerCase().includes(query) ||
+          node.tags.some((tag) => tag.toLowerCase().includes(query))
       );
     }
 
     // Apply tag filter
     if (selectedTags.length > 0) {
-      filteredNodes = filteredNodes.filter(node => 
-        selectedTags.some(tag => node.tags.includes(tag))
+      filteredNodes = filteredNodes.filter((node) =>
+        selectedTags.some((tag) => node.tags.includes(tag))
       );
     }
 
     // Filter links to only include those between filtered nodes
-    filteredLinks = filteredLinks.filter(link => {
-      const sourceNode = filteredNodes.find(n => n.id === link.source);
-      const targetNode = filteredNodes.find(n => n.id === link.target);
-      return sourceNode && targetNode;
+    const filteredNodeIds = new Set(filteredNodes.map((n) => n.id));
+    filteredLinks = filteredLinks.filter((link) => {
+      return filteredNodeIds.has(link.source) && filteredNodeIds.has(link.target);
     });
 
     return { nodes: filteredNodes, links: filteredLinks };
@@ -141,180 +189,205 @@ const TagVisualizer: React.FC = () => {
   useEffect(() => {
     if (!svgRef.current || graphData.nodes.length === 0) return;
 
-    const svg = d3.select(svgRef.current);
-    svg.selectAll('*').remove();
+    try {
+      const svg = select(svgRef.current);
+      svg.selectAll("*").remove();
 
-    const filteredData = filteredGraphData();
-    const nodes = filteredData.nodes;
-    const links = filteredData.links;
+      const filteredData = filteredGraphData;
+      const nodes: D3Node[] = filteredData.nodes.map((n) => ({ ...n }));
+      const links: D3Link[] = filteredData.links.map((l) => ({ ...l }));
 
-    if (nodes.length === 0) return;
+      if (nodes.length === 0) return;
 
-    const width = svgRef.current.clientWidth;
-    const height = svgRef.current.clientHeight;
+      const width = svgRef.current.clientWidth;
+      const height = svgRef.current.clientHeight;
 
-    // Create a force simulation
-    const simulation = d3.forceSimulation(nodes as any)
-      .force('link', d3.forceLink(links as any).id(d => d.id).distance(100))
-      .force('charge', d3.forceManyBody().strength(-200))
-      .force('center', d3.forceCenter(width / 2, height / 2))
-      .force('collision', d3.forceCollide().radius(30));
+      // Create a force simulation
+      const simulation = forceSimulation(nodes as any)
+        .force(
+          "link",
+          forceLink(links as any)
+            .id((d: any) => d.id)
+            .distance(D3_CONFIG.LINK_DISTANCE)
+        )
+        .force("charge", forceManyBody().strength(D3_CONFIG.CHARGE_STRENGTH))
+        .force("center", forceCenter(width / 2, height / 2))
+        .force("collision", forceCollide().radius(D3_CONFIG.COLLISION_RADIUS));
 
-    // Create links
-    const link = svg.append('g')
-      .selectAll('line')
-      .data(links)
-      .enter().append('line')
-      .attr('stroke', '#999')
-      .attr('stroke-opacity', 0.6)
-      .attr('stroke-width', d => Math.sqrt(d.value));
+      // Create links
+      const link = svg
+        .append("g")
+        .selectAll("line")
+        .data(links)
+        .enter()
+        .append("line")
+        .attr("stroke", "#999")
+        .attr("stroke-opacity", 0.6)
+        .attr("stroke-width", (d: any) => Math.sqrt(d.value));
 
-    // Create nodes
-    const node = svg.append('g')
-      .selectAll('g')
-      .data(nodes)
-      .enter().append('g')
-      .call(d3.drag()
-        .on('start', dragstarted)
-        .on('drag', dragged)
-        .on('end', dragended));
+      // Create nodes
+      const node = svg
+        .append("g")
+        .selectAll("g")
+        .data(nodes)
+        .enter()
+        .append("g")
+        .call(drag().on("start", dragstarted).on("drag", dragged).on("end", dragended));
 
-    // Add circles for nodes
-    node.append('circle')
-      .attr('r', 20)
-      .attr('fill', d => {
-        if (d.tags.length === 0) return '#ccc';
-        const colors = ['#6366f1', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#3b82f6'];
-        return colors[d.tags.length % colors.length];
-      })
-      .attr('stroke', '#fff')
-      .attr('stroke-width', 2);
-
-    // Add text labels
-    node.append('text')
-      .text(d => d.title.length > 12 ? d.title.substring(0, 10) + '...' : d.title)
-      .attr('text-anchor', 'middle')
-      .attr('dy', 40)
-      .attr('font-size', 10)
-      .attr('fill', '#333');
-
-    // Add tag badges
-    node.append('g')
-      .attr('transform', 'translate(0, -30)')
-      .selectAll('text')
-      .data(d => d.tags.slice(0, 2)) // Show max 2 tags
-      .enter().append('text')
-      .text(tag => tag.length > 8 ? tag.substring(0, 6) + '...' : tag)
-      .attr('text-anchor', 'middle')
-      .attr('dy', (d, i) => i * -12)
-      .attr('font-size', 8)
-      .attr('fill', '#666')
-      .attr('class', 'tag-label');
-
-    // Tooltip
-    const tooltip = d3.select('body').append('div')
-      .attr('class', 'tag-visualizer-tooltip')
-      .style('position', 'absolute')
-      .style('background', 'white')
-      .style('border', '1px solid #ddd')
-      .style('border-radius', '4px')
-      .style('padding', '8px')
-      .style('pointer-events', 'none')
-      .style('opacity', 0);
-
-    // Add hover effects
-    node.on('mouseover', (event, d) => {
-      tooltip.transition()
-        .duration(200)
-        .style('opacity', .9);
-      tooltip.html(`
-        <div><strong>${d.title}</strong></div>
-        <div>${d.tags.length > 0 ? 'Tags: ' + d.tags.join(', ') : 'No tags'}</div>
-      `)
-        .style('left', (event.pageX + 10) + 'px')
-        .style('top', (event.pageY - 28) + 'px');
-    })
-    .on('mouseout', () => {
-      tooltip.transition()
-        .duration(500)
-        .style('opacity', 0);
-    });
-
-    // Update positions on each tick
-    simulation.on('tick', () => {
-      link
-        .attr('x1', d => (d.source as any).x)
-        .attr('y1', d => (d.source as any).y)
-        .attr('x2', d => (d.target as any).x)
-        .attr('y2', d => (d.target as any).y);
-
+      // Add circles for nodes
       node
-        .attr('transform', d => `translate(${d.x},${d.y})`);
-    });
+        .append("circle")
+        .attr("r", D3_CONFIG.NODE_RADIUS)
+        .attr("fill", (d: any) => {
+          if (d.tags.length === 0) return "#ccc";
+          return D3_CONFIG.COLORS[d.tags.length % D3_CONFIG.COLORS.length];
+        })
+        .attr("stroke", "#fff")
+        .attr("stroke-width", 2);
 
-    // Drag functions
-    function dragstarted(event: any, d: any) {
-      if (!event.active) simulation.alphaTarget(0.3).restart();
-      d.fx = d.x;
-      d.fy = d.y;
+      // Add text labels
+      node
+        .append("text")
+        .text((d: any) => (d.title.length > 12 ? d.title.substring(0, 10) + "..." : d.title))
+        .attr("text-anchor", "middle")
+        .attr("dy", 40)
+        .attr("font-size", 10)
+        .attr("fill", "#333");
+
+      // Add tag badges
+      node
+        .append("g")
+        .attr("transform", "translate(0, -30)")
+        .selectAll("text")
+        .data((d: any) => d.tags.slice(0, 2)) // Show max 2 tags
+        .enter()
+        .append("text")
+        .text((tag: string) => (tag.length > 8 ? tag.substring(0, 6) + "..." : tag))
+        .attr("text-anchor", "middle")
+        .attr("dy", (_: any, i: number) => i * -12)
+        .attr("font-size", 8)
+        .attr("fill", "#666")
+        .attr("class", "tag-label");
+
+      // Tooltip
+      const tooltip = select("body")
+        .append("div")
+        .attr("class", "tag-visualizer-tooltip")
+        .style("position", "absolute")
+        .style("background", "white")
+        .style("border", "1px solid #ddd")
+        .style("border-radius", "4px")
+        .style("padding", "8px")
+        .style("pointer-events", "none")
+        .style("opacity", 0);
+
+      // Add hover effects
+      node
+        .on("mouseover", (event: any, d: any) => {
+          tooltip.transition().duration(200).style("opacity", 0.9);
+          tooltip
+            .html(
+              `
+          <div><strong>${d.title}</strong></div>
+          <div>${d.tags.length > 0 ? "Tags: " + d.tags.join(", ") : "No tags"}</div>
+        `
+            )
+            .style("left", `${event.pageX + 10}px`)
+            .style("top", `${event.pageY - 28}px`);
+        })
+        .on("mouseout", () => {
+          tooltip.transition().duration(500).style("opacity", 0);
+        });
+
+      // Update positions on each tick
+      simulation.on("tick", () => {
+        link
+          .attr("x1", (d: any) => (d.source as any).x)
+          .attr("y1", (d: any) => (d.source as any).y)
+          .attr("x2", (d: any) => (d.target as any).x)
+          .attr("y2", (d: any) => (d.target as any).y);
+
+        node.attr("transform", (d: any) => `translate(${d.x},${d.y})`);
+      });
+
+      // Drag functions
+      function dragstarted(event: any, d: any) {
+        if (!event.active) simulation.alphaTarget(0.3).restart();
+        d.fx = d.x;
+        d.fy = d.y;
+      }
+
+      function dragged(event: any, d: any) {
+        d.fx = event.x;
+        d.fy = event.y;
+      }
+
+      function dragended(event: any, d: any) {
+        if (!event.active) simulation.alphaTarget(0);
+        d.fx = null;
+        d.fy = null;
+      }
+
+      // Cleanup
+      return () => {
+        simulation.stop();
+        tooltip.remove();
+        svg.selectAll("*").remove();
+      };
+    } catch (d3Error) {
+      console.error("D3.js error:", d3Error);
     }
-
-    function dragged(event: any, d: any) {
-      d.fx = event.x;
-      d.fy = event.y;
-    }
-
-    function dragended(event: any, d: any) {
-      if (!event.active) simulation.alphaTarget(0);
-      d.fx = null;
-      d.fy = null;
-    }
-
-    // Cleanup
-    return () => {
-      simulation.stop();
-      tooltip.remove();
-    };
   }, [graphData, filteredGraphData]);
 
-  // Handle window resize
+  // Handle window resize met debounce
   useEffect(() => {
+    let resizeTimeout: number | null = null;
     const handleResize = () => {
-      // Re-render on resize
-      if (svgRef.current) {
-        // Force re-render by temporarily hiding and showing
-        const svg = d3.select(svgRef.current);
-        svg.selectAll('*').remove();
+      if (resizeTimeout) {
+        clearTimeout(resizeTimeout);
       }
+      resizeTimeout = window.setTimeout(() => {
+        if (svgRef.current) {
+          const svg = select(svgRef.current);
+          svg.selectAll("*").remove();
+        }
+      }, 200);
     };
 
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    window.addEventListener("resize", handleResize);
+    return () => {
+      if (resizeTimeout) {
+        clearTimeout(resizeTimeout);
+      }
+      window.removeEventListener("resize", handleResize);
+    };
   }, []);
 
   const toggleTagSelection = (tag: string) => {
-    setSelectedTags(prev => {
+    setSelectedTags((prev) => {
       if (prev.includes(tag)) {
-        return prev.filter(t => t !== tag);
-      } else {
-        return [...prev, tag];
+        return prev.filter((t) => t !== tag);
       }
+      return [...prev, tag];
     });
   };
 
   const clearFilters = () => {
-    setSearchQuery('');
+    setSearchQuery("");
     setSelectedTags([]);
   };
 
-  const filteredNotes = notes.filter(node => {
-    const matchesSearch = searchQuery.trim() === '' || 
-      node.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      node.tags.some(tag => tag.toLowerCase().includes(searchQuery.toLowerCase()));
-    const matchesTags = selectedTags.length === 0 || 
-      selectedTags.some(tag => node.tags.includes(tag));
-    return matchesSearch && matchesTags;
-  });
+  const filteredNotes = useMemo(() => {
+    return notes.filter((node) => {
+      const matchesSearch =
+        searchQuery.trim() === "" ||
+        node.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        node.tags.some((tag) => tag.toLowerCase().includes(searchQuery.toLowerCase()));
+      const matchesTags =
+        selectedTags.length === 0 || selectedTags.some((tag) => node.tags.includes(tag));
+      return matchesSearch && matchesTags;
+    });
+  }, [notes, searchQuery, selectedTags]);
 
   return (
     <div className="tag-visualizer">
@@ -322,15 +395,15 @@ const TagVisualizer: React.FC = () => {
         <h2>Tag Relationship Visualizer</h2>
         <div className="tag-visualizer-controls">
           <div className="view-mode-toggle">
-            <button 
-              className={viewMode === 'graph' ? 'active' : ''} 
-              onClick={() => setViewMode('graph')}
+            <button
+              className={viewMode === "graph" ? "active" : ""}
+              onClick={() => setViewMode("graph")}
             >
               Graph View
             </button>
-            <button 
-              className={viewMode === 'list' ? 'active' : ''} 
-              onClick={() => setViewMode('list')}
+            <button
+              className={viewMode === "list" ? "active" : ""}
+              onClick={() => setViewMode("list")}
             >
               List View
             </button>
@@ -347,7 +420,7 @@ const TagVisualizer: React.FC = () => {
             onChange={(e) => setSearchQuery(e.target.value)}
           />
         </div>
-        
+
         <div className="tag-filter">
           <div className="tag-filter-header">
             <span>Filter by Tags:</span>
@@ -358,10 +431,10 @@ const TagVisualizer: React.FC = () => {
             )}
           </div>
           <div className="tag-chips">
-            {allTags.map(tag => (
+            {allTags.map((tag) => (
               <span
                 key={tag}
-                className={`tag-chip ${selectedTags.includes(tag) ? 'selected' : ''}`}
+                className={`tag-chip ${selectedTags.includes(tag) ? "selected" : ""}`}
                 onClick={() => toggleTagSelection(tag)}
               >
                 {tag}
@@ -373,16 +446,13 @@ const TagVisualizer: React.FC = () => {
 
       {isLoading ? (
         <div className="loading">Loading notes...</div>
+      ) : error ? (
+        <div className="error">Error: {error}</div>
       ) : (
         <div className="tag-visualizer-content">
-          {viewMode === 'graph' ? (
+          {viewMode === "graph" ? (
             <div className="graph-container">
-              <svg 
-                ref={svgRef} 
-                width="100%" 
-                height="600"
-                className="tag-visualizer-svg"
-              />
+              <svg ref={svgRef} width="100%" height="600" className="tag-visualizer-svg" />
               {filteredNotes.length === 0 && (
                 <div className="no-results">No notes match your filters</div>
               )}
@@ -390,13 +460,13 @@ const TagVisualizer: React.FC = () => {
           ) : (
             <div className="list-container">
               <div className="notes-list">
-                {filteredNotes.map(note => (
+                {filteredNotes.map((note) => (
                   <div key={note.id} className="note-card">
                     <div className="note-title">{note.title}</div>
                     <div className="note-tags">
-                      {note.tags.map(tag => (
-                        <span 
-                          key={tag} 
+                      {note.tags.map((tag) => (
+                        <span
+                          key={tag}
                           className="note-tag"
                           onClick={() => toggleTagSelection(tag)}
                         >
@@ -405,7 +475,12 @@ const TagVisualizer: React.FC = () => {
                       ))}
                     </div>
                     <div className="note-connections">
-                      Connected to {graphData.links.filter(l => l.source === note.id || l.target === note.id).length} notes
+                      Connected to
+                      {
+                        graphData.links.filter((l) => l.source === note.id || l.target === note.id)
+                          .length
+                      }{" "}
+                      notes
                     </div>
                   </div>
                 ))}
