@@ -2,6 +2,8 @@ const HtmlWebpackPlugin = require('html-webpack-plugin');
 const CopyPlugin = require("copy-webpack-plugin");
 const ZipPlugin = require('zip-webpack-plugin');
 const { BundleAnalyzerPlugin } = require('webpack-bundle-analyzer');
+const MiniCssExtractPlugin = require('mini-css-extract-plugin');
+const CssMinimizerPlugin = require('css-minimizer-webpack-plugin');
 
 const PACKAGE = require('./package.json');
 const version = PACKAGE.version;
@@ -14,7 +16,7 @@ module.exports = (env, argv) => {
     mode: isProduction ? 'production' : 'development',
     entry: {
       main: 'index.tsx',
-      demo: 'demo/demo.tsx'
+      demo: 'demo/demo.tsx',
     },
     output: {
       filename: "[name].[contenthash:8].js",
@@ -28,7 +30,7 @@ module.exports = (env, argv) => {
     optimization: {
       minimize: isProduction,
       minimizer: [
-        // Gebruik TerserPlugin voor betere minification
+        // Gebruik TerserPlugin voor betere JS minification
         new (require('terser-webpack-plugin'))({
           terserOptions: {
             compress: {
@@ -36,7 +38,23 @@ module.exports = (env, argv) => {
             },
           },
         }),
-      ],
+        // CSS minification voor productie
+        isProduction && new CssMinimizerPlugin({
+          test: /\.(scss|css)$/i,
+          minimizerOptions: {
+            preset: [
+              'default',
+              {
+                discardComments: { removeAll: true },
+                normalizeWhitespace: true,
+                minifyFontValues: { removeAfter: false },
+                convertUnit: false,
+                cssDeclarationSorter: true,
+              },
+            ],
+          },
+        }),
+      ].filter(Boolean),
       splitChunks: {
         chunks: 'all',
         cacheGroups: {
@@ -93,18 +111,40 @@ module.exports = (env, argv) => {
           },
         },
         {
-          test: /\.css$/i,
+          test: /\.scss$/i,
           use: [
-            "style-loader",
-            "css-loader",
+            isProduction ? MiniCssExtractPlugin.loader : "style-loader",
+            {
+              loader: "css-loader",
+              options: {
+                modules: false,
+                sourceMap: !isProduction,
+                importLoaders: 1,
+              },
+            },
+            {
+              loader: "sass-loader",
+              options: {
+                sourceMap: !isProduction,
+                // Optimaliseer Sass compilatie
+                sassOptions: {
+                  outputStyle: isProduction ? 'compressed' : 'expanded',
+                },
+              },
+            },
           ],
         },
         {
-          test: /\.scss$/i,
+          test: /\.css$/i,
           use: [
-            "style-loader",
-            "css-loader",
-            "sass-loader"
+            isProduction ? MiniCssExtractPlugin.loader : "style-loader",
+            {
+              loader: "css-loader",
+              options: {
+                modules: false,
+                sourceMap: !isProduction,
+              },
+            },
           ],
         },
         {
@@ -118,7 +158,7 @@ module.exports = (env, argv) => {
         'node_modules',
         'src'
       ],
-      extensions: ['.tsx', '.ts', '.js', '.jsx'],
+      extensions: ['.tsx', '.ts', '.js', '.jsx', '.scss', '.css'],
       alias: {
         react: "preact/compat",
         'react-dom': "preact/compat",
@@ -182,6 +222,11 @@ module.exports = (env, argv) => {
       }),
       new ZipPlugin({
         filename: `latest.zip`
+      }),
+      // CSS extraction voor productie
+      isProduction && new MiniCssExtractPlugin({
+        filename: '[name].[contenthash:8].css',
+        chunkFilename: '[id].[contenthash:8].chunk.css',
       }),
       // Bundle analyzer voor debugging
       shouldAnalyze && new BundleAnalyzerPlugin({
