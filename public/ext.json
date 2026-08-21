@@ -2,7 +2,7 @@
   "identifier": "dev.tinux67.tag-visualizer",
   "name": "Tag Relationship Visualizer",
   "content_type": "SN|Component",
-  "area": "editor-editor",
+  "area": "sidebar-bottom",
   "version": "$VERSION$",
   "description": "Visualize the relationship between notes based on their tags with filter and search functionality",
   "url": "https://tinux-67.github.io/Standard-Notes-Plugins/",
