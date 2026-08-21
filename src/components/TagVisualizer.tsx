@@ -53,6 +53,9 @@ const D3_CONFIG = {
   MAX_TAG_BADGES: 2,
   RESIZE_DEBOUNCE_MS: 200,
   MAX_NODES_FOR_FULL_RENDER: 100,
+  MAX_CONNECTIONS_PER_NODE: 20,
+  MAX_NOTES_TO_SAMPLE: 300,
+  NOISE_TAG_THRESHOLD: 0.3, // Prune tags that appear in more than 30% of notes
 } as const;
 
 // ============================================================================
@@ -179,31 +182,55 @@ const createGraphData = (noteNodes: NoteNode[]): GraphData => {
     });
   });
 
+  // Edge Pruning: Identify "noise" tags (too common to be meaningful)
+  const totalNotes = noteNodes.length;
+  const noiseTags = new Set<string>();
+  tagToNotes.forEach((noteIds, tag) => {
+    if (noteIds.size / totalNotes > D3_CONFIG.NOISE_TAG_THRESHOLD) {
+      noiseTags.add(tag);
+    }
+  });
+
   // O(n) - Genereer links tussen notes die tags delen
-  tagToNotes.forEach((noteIds) => {
+  tagToNotes.forEach((noteIds, tag) => {
+    if (noiseTags.has(tag)) return; // Prune links from noise tags
+
     const ids = Array.from(noteIds);
     for (let i = 0; i < ids.length; i++) {
       for (let j = i + 1; j < ids.length; j++) {
         const source = ids[i];
         const target = ids[j];
-        const key = `${source}<->${target}`;
+        const key = source < target ? `${source}<->${target}` : `${target}<->${source}`;
 
-        const sharedTags = noteMap.get(source)!.tags.filter(
-          tag => noteMap.get(target)!.tags.includes(tag)
-        );
-
-        if (linkMap.has(key)) {
-          linkMap.get(key)!.value += sharedTags.length;
-        } else {
-          linkMap.set(key, { source, target, value: sharedTags.length });
-        }
+        // Optimize: Instead of filtering all tags, just increment based on current tag
+        // We will add more value later if they share more tags
+        const currentVal = linkMap.get(key)?.value || 0;
+        linkMap.set(key, { source: source < target ? source : target, target: source < target ? target : source, value: currentVal + 1 });
       }
     }
   });
 
+  // Connection Pruning: Limit number of connections per node to avoid "hairball" effect
+  const nodeConnections = new Map<string, number>();
+  const finalLinks: TagLink[] = [];
+
+  // Sort links by value (strongest connections first)
+  const sortedLinks = Array.from(linkMap.values()).sort((a, b) => b.value - a.value);
+
+  for (const link of sortedLinks) {
+    const sCount = nodeConnections.get(link.source) || 0;
+    const tCount = nodeConnections.get(link.target) || 0;
+
+    if (sCount < D3_CONFIG.MAX_CONNECTIONS_PER_NODE && tCount < D3_CONFIG.MAX_CONNECTIONS_PER_NODE) {
+      finalLinks.push(link);
+      nodeConnections.set(link.source, sCount + 1);
+      nodeConnections.set(link.target, tCount + 1);
+    }
+  }
+
   return {
     nodes: noteNodes,
-    links: Array.from(linkMap.values())
+    links: finalLinks
   };
 };
 
@@ -534,26 +561,42 @@ const TagVisualizer: React.FC = () => {
       const width = svgRef.current.clientWidth || 800;
       const height = svgRef.current.clientHeight || 600;
       
-      const nodes: D3Node[] = filteredGraphData.nodes.map((n) => ({ ...n }));
-      const links: D3Link[] = filteredGraphData.links.map((l) => ({ ...l }));
+      // Implementation of Sophisticated Sampling Strategy
+      let nodes: D3Node[] = filteredGraphData.nodes.map((n) => ({ ...n }));
+      let links: D3Link[] = filteredGraphData.links.map((l) => ({ ...l }));
 
-      // Voor grote datasets: beperk het aantal nodes voor performance
-      const shouldRenderFullGraph = nodes.length <= D3_CONFIG.MAX_NODES_FOR_FULL_RENDER;
-      
-      if (shouldRenderFullGraph) {
-        const cleanup = renderGraph(nodes, links, width, height);
-        return cleanup;
-      } else {
-        // Voor grote datasets: toon een bericht
-        const svg = select(svgRef.current);
-        svg.selectAll("*").remove();
-        svg.append("text")
-          .attr("x", width / 2)
-          .attr("y", height / 2)
-          .attr("text-anchor", "middle")
-          .attr("fill", "#666")
-          .text(`Too many notes (${nodes.length}) to display. Use filters to reduce the number.`);
+      if (nodes.length > D3_CONFIG.MAX_NOTES_TO_SAMPLE) {
+        // Strategy: Priority Sampling
+        // 1. Keep nodes with the most connections (central hubs)
+        // 2. Fill the rest with random samples to maintain representativeness
+        
+        const connectionCounts = new Map<string, number>();
+        links.forEach(l => {
+          const s = typeof l.source === 'string' ? l.source : (l.source as any).id;
+          const t = typeof l.target === 'string' ? l.target : (l.target as any).id;
+          connectionCounts.set(s, (connectionCounts.get(s) || 0) + 1);
+          connectionCounts.set(t, (connectionCounts.get(t) || 0) + 1);
+        });
+
+        const sortedNodes = [...nodes].sort((a, b) => 
+          (connectionCounts.get(b.id) || 0) - (connectionCounts.get(a.id) || 0)
+        );
+
+        const hubs = sortedNodes.slice(0, Math.floor(D3_CONFIG.MAX_NOTES_TO_SAMPLE * 0.6));
+        const remaining = sortedNodes.slice(Math.floor(D3_CONFIG.MAX_NOTES_TO_SAMPLE * 0.6));
+        const samples = remaining.sort(() => 0.5 - Math.random()).slice(0, D3_CONFIG.MAX_NOTES_TO_SAMPLE - hubs.length);
+        
+        const sampledNodeIds = new Set([...hubs, ...samples].map(n => n.id));
+        nodes = nodes.filter(n => sampledNodeIds.has(n.id));
+        links = links.filter(l => {
+          const s = typeof l.source === 'string' ? l.source : (l.source as any).id;
+          const t = typeof l.target === 'string' ? l.target : (l.target as any).id;
+          return sampledNodeIds.has(s) && sampledNodeIds.has(t);
+        });
       }
+
+      const cleanup = renderGraph(nodes, links, width, height);
+      return cleanup;
     } catch (d3Error) {
       console.error("D3.js error:", d3Error);
     }
