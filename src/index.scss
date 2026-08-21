@@ -362,8 +362,9 @@
     font-size: var(--font-size-lg);
   }
 
-  // Tooltip
   .tag-visualizer-tooltip {
+    position: absolute;
+    pointer-events: none;
     box-shadow: var(--shadow-lg);
     z-index: var(--z-tooltip);
     max-width: 300px;
@@ -372,6 +373,7 @@
     border-radius: var(--radius-sm);
     padding: var(--spacing-sm);
     color: var(--color-text-primary);
+    transition: opacity var(--transition-fast);
 
     div {
       margin: var(--spacing-xs) 0;

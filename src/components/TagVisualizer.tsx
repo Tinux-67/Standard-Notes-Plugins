@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo, memo, Component } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo, memo, Component, createPortal } from "react";
 import {
   select,
   forceSimulation,
@@ -270,7 +270,6 @@ const TagVisualizer: React.FC = () => {
   // Refs
   const svgRef = useRef<SVGSVGElement>(null);
   const simulationRef = useRef<Simulation<D3Node, D3Link> | null>(null);
-  const tooltipRef = useRef<HTMLDivElement>(null);
 
   // State
   const [notes, setNotes] = useState<NoteNode[]>([]);
@@ -281,6 +280,13 @@ const TagVisualizer: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"graph" | "list">("graph");
+  const [tooltipData, setTooltipData] = useState<{
+    title: string;
+    tags: string[];
+    x: number;
+    y: number;
+    visible: boolean;
+  } | null>(null);
   const [performanceMetrics, setPerformanceMetrics] = useState({
     graphGenerationTime: 0,
     renderTime: 0,
@@ -481,42 +487,26 @@ const TagVisualizer: React.FC = () => {
       .attr("fill", "#666")
       .attr("class", "tag-label");
 
-    // Create tooltip element once and reuse it
-    if (!tooltipRef.current) {
-      tooltipRef.current = select("body")
-        .append("div")
-        .attr("class", "tag-visualizer-tooltip")
-        .style("position", "absolute")
-        .style("background", "white")
-        .style("border", "1px solid #ddd")
-        .style("border-radius", "4px")
-        .style("padding", "8px")
-        .style("pointer-events", "none")
-        .style("opacity", 0)
-        .style("box-shadow", "0 2px 10px rgba(0, 0, 0, 0.1)")
-        .style("z-index", "1000")
-        .style("max-width", "300px")
-        .node() as HTMLDivElement;
-    }
-
     // Add hover effects
     node
       .on("mouseover", (event: any, d: any) => {
-        const tooltip = select(tooltipRef.current);
-        tooltip.transition().duration(200).style("opacity", 0.9);
-        
-        const tagsText = d.tags.length > 0 
-          ? "Tags: " + d.tags.slice(0, D3_CONFIG.MAX_TAGS_IN_TOOLTIP).join(", ")
-          : "No tags";
-        
-        tooltip
-          .html(`<div><strong>${d.title}</strong></div><div>${tagsText}</div>`)
-          .style("left", `${event.pageX + 10}px`)
-          .style("top", `${event.pageY - 28}px`);
+        setTooltipData({
+          title: d.title,
+          tags: d.tags,
+          x: event.pageX + 10,
+          y: event.pageY - 28,
+          visible: true,
+        });
+      })
+      .on("mousemove", (event: any, d: any) => {
+        setTooltipData((prev) => prev ? {
+          ...prev,
+          x: event.pageX + 10,
+          y: event.pageY - 28,
+        } : null);
       })
       .on("mouseout", () => {
-        const tooltip = select(tooltipRef.current);
-        tooltip.transition().duration(500).style("opacity", 0);
+        setTooltipData(null);
       });
 
     // Update positions on each tick
@@ -568,12 +558,7 @@ const TagVisualizer: React.FC = () => {
       console.error("D3.js error:", d3Error);
     }
 
-    // Cleanup tooltip on unmount
     return () => {
-      if (tooltipRef.current && tooltipRef.current.parentNode) {
-        tooltipRef.current.parentNode.removeChild(tooltipRef.current);
-        tooltipRef.current = null;
-      }
       if (simulationRef.current) {
         simulationRef.current.stop();
         simulationRef.current = null;
@@ -736,6 +721,27 @@ const TagVisualizer: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Tooltip Portal */}
+      {tooltipData && createPortal(
+        <div 
+          className="tag-visualizer-tooltip" 
+          style={{ 
+            left: tooltipData.x, 
+            top: tooltipData.y,
+            position: 'absolute',
+            pointerEvents: 'none'
+          }}
+        >
+          <div><strong>{tooltipData.title}</strong></div>
+          <div>
+            {tooltipData.tags.length > 0 
+              ? "Tags: " + tooltipData.tags.slice(0, D3_CONFIG.MAX_TAGS_IN_TOOLTIP).join(", ")
+              : "No tags"}
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 };
