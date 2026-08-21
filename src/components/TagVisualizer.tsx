@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo, memo } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo, memo, Component } from "react";
 import {
   select,
   forceSimulation,
@@ -54,6 +54,38 @@ const D3_CONFIG = {
   RESIZE_DEBOUNCE_MS: 200,
   MAX_NODES_FOR_FULL_RENDER: 100,
 } as const;
+
+// ============================================================================
+// ERROR BOUNDARY
+// ============================================================================
+
+class VisualizerErrorBoundary extends Component<{children: React.ReactNode}, {hasError: boolean}> {
+  constructor(props: any) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(_: Error) {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error("TagVisualizer Error Boundary caught an error:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="error-boundary-fallback">
+          <h3>Something went wrong with the visualization</h3>
+          <p>The graph could not be rendered. Please try refreshing or adjusting your filters.</p>
+          <button onClick={() => this.setState({ hasError: false })}>Try Again</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 // ============================================================================
 // MEMOIZED COMPONENTS
@@ -265,7 +297,7 @@ const TagVisualizer: React.FC = () => {
       setIsLoading(true);
       setError(null);
       
-      const items = await (snApi as any).getItems?.();
+      const items = await snApi.getItems?.();
 
       if (!items) {
         throw new Error("Standard Notes API not available");
