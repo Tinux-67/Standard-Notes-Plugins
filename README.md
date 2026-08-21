@@ -1,5 +1,10 @@
 # Standard Notes Tag Relationship Visualizer Plugin
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![React](https://img.shields.io/badge/React-18-61dafb?logo=react&logoColor=white)](https://react.dev)
+[![D3.js](https://img.shields.io/badge/D3.js-v7-f9a01b?logo=d3.js&logoColor=white)](https://d3js.org/)
+[![PWA](https://img.shields.io/badge/PWA-Compatible-blue)](https://web.dev/pwa/)
+
 A Standard Notes plugin that visualizes the relationship between notes based on their tags. This plugin provides both a graph view and a list view, with powerful filter and search functionality to help you understand how your notes are connected.
 
 ## Features
